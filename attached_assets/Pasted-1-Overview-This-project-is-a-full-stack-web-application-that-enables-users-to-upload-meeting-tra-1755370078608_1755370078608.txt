@@ -1,0 +1,82 @@
+1. Overview
+
+This project is a full-stack web application that enables users to upload meeting transcripts (or paste raw text), provide custom summarization instructions, generate AI-powered summaries, edit them, and share them via email.
+The focus is on functionality over design, ensuring a minimalistic frontend and reliable backend logic.
+
+2. Goals & Objectives
+
+Allow users to upload meeting transcripts or paste text directly.
+
+Let users input a custom summarization prompt.
+
+Use AI to generate structured summaries based on the prompt.
+
+Allow manual edits to the generated summary.
+
+Enable sharing the summary via email to specified recipients.
+
+Keep frontend minimal — focus on backend + AI integration.
+
+3. Target Users
+
+Professionals attending meetings who need quick, structured summaries.
+
+Team leads/managers needing executive summaries.
+
+Project managers tracking action items.
+
+4. User Stories
+
+Upload Transcript:
+As a user, I want to upload a meeting transcript file (txt/pdf/docx) or paste text so that I can use it for summarization.
+
+Custom Prompt:
+As a user, I want to provide custom instructions for the summary so I can control the format and focus.
+
+Generate Summary:
+As a user, I want the AI to process the transcript and generate a summary according to my prompt.
+
+Edit Summary:
+As a user, I want to make manual edits to the AI-generated summary before sharing it.
+
+Share via Email:
+As a user, I want to send the edited summary to one or more email recipients.
+
+5. Functional Requirements
+Frontend
+
+File upload component (support: .txt, .pdf, .docx).
+
+Text input area for pasting transcript.
+
+Prompt input field.
+
+“Generate Summary” button.
+
+Editable text area showing AI output.
+
+Recipient email input field.
+
+“Send Email” button.
+
+Backend
+
+API endpoint for file/text upload.
+
+AI processing endpoint (integrated with Groq/ChatGPT/etc.).
+
+Summary storage (in-memory or database).
+
+Email sending service (e.g., Nodemailer, SendGrid, AWS SES).
+
+Basic authentication (optional for MVP).
+
+6. Non-Functional Requirements
+
+Performance: Summary generation should complete within 10 seconds for ≤ 10k words.
+
+Security: Sanitize inputs, validate email addresses, and limit file size (e.g., max 10MB).
+
+Scalability: Backend should allow integration with different AI APIs.
+
+UI Simplicity: Minimal CSS, focus on usability.
