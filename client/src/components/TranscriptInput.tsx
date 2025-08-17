@@ -1,11 +1,17 @@
-import { useState, useCallback } from "react";
-import { Card, CardContent } from "@/components/ui/card";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
+import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
-import { apiRequest } from "@/lib/api";
-import { Upload, FileText, Trash2, CloudUpload } from "lucide-react";
+import {
+  AlertCircle,
+  CloudUpload,
+  FileText,
+  Trash2,
+  Upload,
+} from "lucide-react";
+import { useCallback, useState } from "react";
 
 interface TranscriptInputProps {
   onTranscriptChange: (transcript: string, filename?: string) => void;
@@ -13,73 +19,96 @@ interface TranscriptInputProps {
   filename: string;
 }
 
-export default function TranscriptInput({ onTranscriptChange, transcript, filename }: TranscriptInputProps) {
+export default function TranscriptInput({
+  onTranscriptChange,
+  transcript,
+  filename,
+}: TranscriptInputProps) {
   const [isUploading, setIsUploading] = useState(false);
   const [dragActive, setDragActive] = useState(false);
   const { toast } = useToast();
+  const [uploadError, setUploadError] = useState<string | null>(null);
 
-  const handleFileUpload = useCallback(async (file: File) => {
-    if (!file) return;
+  const handleFileUpload = useCallback(
+    async (file: File) => {
+      if (!file) return;
 
-    // Validate file type
-    const allowedTypes = ['.txt', '.pdf', '.docx'];
-    const fileExt = '.' + file.name.split('.').pop()?.toLowerCase();
-    
-    if (!allowedTypes.includes(fileExt)) {
-      toast({
-        title: "Invalid file type",
-        description: "Please upload a .txt, .pdf, or .docx file",
-        variant: "destructive",
-      });
-      return;
-    }
+      // Reset error state
+      setUploadError(null);
 
-    // Validate file size (10MB)
-    if (file.size > 10 * 1024 * 1024) {
-      toast({
-        title: "File too large",
-        description: "Please upload a file smaller than 10MB",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    setIsUploading(true);
-    
-    try {
-      const formData = new FormData();
-      formData.append('file', file);
-      
-      const response = await fetch('/api/upload', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('auth-token')}`,
-        },
-        body: formData,
-      });
-
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.message || 'Upload failed');
+      // Validate file type with more robust checking
+      const allowedTypes = [
+        "application/pdf",
+        "text/plain",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      ];
+      if (!allowedTypes.includes(file.type)) {
+        toast({
+          title: "Invalid file type",
+          description: "Please upload a PDF, TXT, or DOCX file",
+          variant: "destructive",
+        });
+        return;
       }
 
-      const data = await response.json();
-      onTranscriptChange(data.text, data.filename);
-      
-      toast({
-        title: "File uploaded successfully",
-        description: `Processed ${data.filename}`,
-      });
-    } catch (error: any) {
-      toast({
-        title: "Upload failed",
-        description: error.message || "Failed to process file",
-        variant: "destructive",
-      });
-    } finally {
-      setIsUploading(false);
-    }
-  }, [onTranscriptChange, toast]);
+      // Validate file size (increased to 20MB for larger PDFs)
+      const maxSize = 20 * 1024 * 1024; // 20MB
+      if (file.size > maxSize) {
+        toast({
+          title: "File too large",
+          description: "Please upload a file smaller than 20MB",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      setIsUploading(true);
+
+      try {
+        const formData = new FormData();
+        formData.append("file", file);
+
+        const response = await fetch("/api/upload", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${localStorage.getItem("auth-token")}`,
+          },
+          body: formData,
+        });
+
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(error.message || "Upload failed");
+        }
+
+        const data = await response.json();
+
+        // Validate extracted text
+        if (!data.text || data.text.trim().length === 0) {
+          throw new Error("No text could be extracted from the file");
+        }
+
+        onTranscriptChange(data.text, file.name);
+
+        toast({
+          title: "File processed successfully",
+          description: `Extracted ${data.text.split(/\s+/).length} words from ${
+            file.name
+          }`,
+        });
+      } catch (error: any) {
+        setUploadError(error.message);
+        toast({
+          title: "Processing failed",
+          description: error.message || "Failed to extract text from file",
+          variant: "destructive",
+        });
+      } finally {
+        setIsUploading(false);
+      }
+    },
+    [onTranscriptChange, toast]
+  );
 
   const handleDrag = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -91,21 +120,27 @@ export default function TranscriptInput({ onTranscriptChange, transcript, filena
     }
   }, []);
 
-  const handleDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setDragActive(false);
-    
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      handleFileUpload(e.dataTransfer.files[0]);
-    }
-  }, [handleFileUpload]);
+  const handleDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setDragActive(false);
 
-  const handleFileInput = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      handleFileUpload(e.target.files[0]);
-    }
-  }, [handleFileUpload]);
+      if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+        handleFileUpload(e.dataTransfer.files[0]);
+      }
+    },
+    [handleFileUpload]
+  );
+
+  const handleFileInput = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      if (e.target.files && e.target.files[0]) {
+        handleFileUpload(e.target.files[0]);
+      }
+    },
+    [handleFileUpload]
+  );
 
   const clearFile = () => {
     onTranscriptChange("", "");
@@ -115,7 +150,9 @@ export default function TranscriptInput({ onTranscriptChange, transcript, filena
     onTranscriptChange("", "");
   };
 
-  const wordCount = transcript.split(/\s+/).filter(word => word.length > 0).length;
+  const wordCount = transcript
+    .split(/\s+/)
+    .filter((word) => word.length > 0).length;
   const charCount = transcript.length;
 
   return (
@@ -125,7 +162,7 @@ export default function TranscriptInput({ onTranscriptChange, transcript, filena
           <Upload className="text-primary-600 mr-3 h-5 w-5" />
           1. Input Transcript
         </h3>
-        
+
         <Tabs defaultValue="upload" className="w-full">
           <TabsList className="grid w-full grid-cols-2 mb-6">
             <TabsTrigger value="upload" className="flex items-center gap-2">
@@ -139,6 +176,13 @@ export default function TranscriptInput({ onTranscriptChange, transcript, filena
           </TabsList>
 
           <TabsContent value="upload" className="space-y-4">
+            {uploadError && (
+              <Alert variant="destructive" className="mb-4">
+                <AlertCircle className="h-4 w-4" />
+                <AlertDescription>{uploadError}</AlertDescription>
+              </Alert>
+            )}
+
             {!filename ? (
               <div
                 className={`border-2 border-dashed rounded-xl p-8 text-center transition-colors cursor-pointer ${
@@ -150,7 +194,7 @@ export default function TranscriptInput({ onTranscriptChange, transcript, filena
                 onDragLeave={handleDrag}
                 onDragOver={handleDrag}
                 onDrop={handleDrop}
-                onClick={() => document.getElementById('file-upload')?.click()}
+                onClick={() => document.getElementById("file-upload")?.click()}
               >
                 <div className="max-w-sm mx-auto">
                   {isUploading ? (
@@ -159,10 +203,14 @@ export default function TranscriptInput({ onTranscriptChange, transcript, filena
                     <CloudUpload className="h-16 w-16 text-gray-400 dark:text-gray-500 mx-auto mb-4" />
                   )}
                   <p className="text-lg font-medium text-gray-900 dark:text-white mb-2">
-                    {isUploading ? "Processing..." : "Drop your transcript here"}
+                    {isUploading
+                      ? "Processing..."
+                      : "Drop your transcript here"}
                   </p>
                   <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
-                    {isUploading ? "Please wait while we process your file" : "Or click to browse files"}
+                    {isUploading
+                      ? "Please wait while we process your file"
+                      : "Or click to browse files"}
                   </p>
                   <p className="text-xs text-gray-400 dark:text-gray-500">
                     Supports .pdf, .docx, .txt files up to 10MB

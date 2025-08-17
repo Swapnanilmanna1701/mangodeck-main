@@ -1,23 +1,33 @@
-import { useState, useEffect } from "react";
-import { Card, CardContent } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { useAutosave } from "@/hooks/useAutosave";
 import { apiRequest } from "@/lib/api";
-import { 
-  Edit3, 
-  Save, 
-  CheckCircle, 
-  RefreshCw, 
-  FileText, 
-  Download,
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
   Bold,
+  CheckCircle,
+  Download,
+  Edit3,
+  FileText,
   Italic,
-  List
+  List,
+  RefreshCw,
+  Save,
 } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+
+interface Summary {
+  id: string;
+  title: string;
+  summaryContent: string;
+  createdAt: string;
+  tone: string;
+  status: string;
+  autoSaved: boolean;
+}
 
 interface SummaryEditorProps {
   summaryId: string;
@@ -25,36 +35,68 @@ interface SummaryEditorProps {
   onSummaryChange: (summary: string) => void;
 }
 
-export default function SummaryEditor({ summaryId, onApprove, onSummaryChange }: SummaryEditorProps) {
+export default function SummaryEditor({
+  summaryId,
+  onApprove,
+  onSummaryChange,
+}: SummaryEditorProps) {
   const [content, setContent] = useState("");
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
   // Fetch summary data
-  const { data: summary, isLoading } = useQuery({
-    queryKey: ["/api/summaries", summaryId],
+  const { data: summary, isLoading } = useQuery<Summary>({
+    queryKey: ["summaries", summaryId],
+    queryFn: async () => {
+      const response = await apiRequest("GET", `/api/summaries/${summaryId}`);
+      return response.json();
+    },
     enabled: !!summaryId,
+    retry: 2,
+    staleTime: 30000,
   });
 
   // Update summary mutation
   const updateSummaryMutation = useMutation({
-    mutationFn: async (data: { summaryContent: string; wordCount: number; autoSaved: boolean }) => {
-      const response = await apiRequest("PATCH", `/api/summaries/${summaryId}`, data);
+    mutationFn: async (data: {
+      summaryContent: string;
+      wordCount: number;
+      autoSaved: boolean;
+    }) => {
+      const response = await apiRequest(
+        "PATCH",
+        `/api/summaries/${summaryId}`,
+        data
+      );
+      if (!response.ok) {
+        throw new Error("Failed to update summary");
+      }
       return response.json();
     },
     onSuccess: () => {
       setLastSaved(new Date());
-      queryClient.invalidateQueries({ queryKey: ["/api/summaries", summaryId] });
+      queryClient.invalidateQueries({ queryKey: ["summaries", summaryId] });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Error saving summary",
+        description: error.message,
+        variant: "destructive",
+      });
     },
   });
 
   // Approve summary mutation
   const approveSummaryMutation = useMutation({
     mutationFn: async () => {
-      const response = await apiRequest("PATCH", `/api/summaries/${summaryId}`, { 
-        status: "approved" 
-      });
+      const response = await apiRequest(
+        "PATCH",
+        `/api/summaries/${summaryId}`,
+        {
+          status: "approved",
+        }
+      );
       return response.json();
     },
     onSuccess: () => {
@@ -63,14 +105,19 @@ export default function SummaryEditor({ summaryId, onApprove, onSummaryChange }:
         description: "Your summary is ready to be shared",
       });
       onApprove();
-      queryClient.invalidateQueries({ queryKey: ["/api/summaries", summaryId] });
+      queryClient.invalidateQueries({
+        queryKey: ["/api/summaries", summaryId],
+      });
     },
   });
 
   // Regenerate summary mutation
   const regenerateMutation = useMutation({
     mutationFn: async () => {
-      const response = await apiRequest("POST", `/api/summaries/${summaryId}/generate`);
+      const response = await apiRequest(
+        "POST",
+        `/api/summaries/${summaryId}/generate`
+      );
       return response.json();
     },
     onSuccess: (data) => {
@@ -79,75 +126,84 @@ export default function SummaryEditor({ summaryId, onApprove, onSummaryChange }:
         title: "Summary regenerated!",
         description: "A new AI summary has been generated",
       });
-      queryClient.invalidateQueries({ queryKey: ["/api/summaries", summaryId] });
+      queryClient.invalidateQueries({
+        queryKey: ["/api/summaries", summaryId],
+      });
     },
   });
 
-  // Export mutations
-  const exportPDFMutation = useMutation({
-    mutationFn: async () => {
-      const response = await fetch(`/api/summaries/${summaryId}/export/pdf`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('auth-token')}`,
-        },
-      });
-      if (!response.ok) throw new Error('Export failed');
-      return response.blob();
-    },
-    onSuccess: (blob) => {
+  // File export handlers with error handling
+  const handleExport = async (format: "pdf" | "docx") => {
+    try {
+      const response = await fetch(
+        `/api/summaries/${summaryId}/export/${format}`,
+        {
+          headers: {
+            Authorization: `Bearer ${localStorage.getItem("auth-token")}`,
+          },
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`Export failed: ${response.statusText}`);
+      }
+
+      const blob = await response.blob();
       const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
+      const a = document.createElement("a");
       a.href = url;
-      a.download = `${summary?.title || 'summary'}.pdf`;
+      a.download = `${summary?.title || "summary"}.${format}`;
       document.body.appendChild(a);
       a.click();
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
-    },
-  });
 
-  const exportDOCXMutation = useMutation({
-    mutationFn: async () => {
-      const response = await fetch(`/api/summaries/${summaryId}/export/docx`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('auth-token')}`,
-        },
+      toast({
+        title: "Export successful",
+        description: `Your summary has been exported as ${format.toUpperCase()}`,
       });
-      if (!response.ok) throw new Error('Export failed');
-      return response.blob();
-    },
-    onSuccess: (blob) => {
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${summary?.title || 'summary'}.docx`;
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
-    },
-  });
-
-  // Autosave functionality
-  const saveContent = async (contentToSave: string) => {
-    const wordCount = contentToSave.split(/\s+/).filter(word => word.length > 0).length;
-    await updateSummaryMutation.mutateAsync({
-      summaryContent: contentToSave,
-      wordCount,
-      autoSaved: true,
-    });
+    } catch (error) {
+      toast({
+        title: "Export failed",
+        description:
+          error instanceof Error ? error.message : "Unknown error occurred",
+        variant: "destructive",
+      });
+    }
   };
 
-  useAutosave(content, saveContent, 2000); // Save every 2 seconds
+  // Memoized save handler
+  const saveContent = useCallback(
+    async (contentToSave: string) => {
+      if (!contentToSave.trim()) return;
 
-  // Initialize content when summary loads
+      const wordCount = contentToSave
+        .split(/\s+/)
+        .filter((word) => word.length > 0).length;
+      try {
+        await updateSummaryMutation.mutateAsync({
+          summaryContent: contentToSave,
+          wordCount,
+          autoSaved: true,
+        });
+      } catch (error) {
+        console.error("Failed to save content:", error);
+      }
+    },
+    [updateSummaryMutation]
+  );
+
+  // Autosave setup
+  useAutosave(content, saveContent, 2000);
+
+  // Content initialization
   useEffect(() => {
     if (summary?.summaryContent && !content) {
       setContent(summary.summaryContent);
     }
   }, [summary, content]);
 
-  // Update parent component when content changes
+  // Parent notification
   useEffect(() => {
     onSummaryChange(content);
   }, [content, onSummaryChange]);
@@ -160,10 +216,10 @@ export default function SummaryEditor({ summaryId, onApprove, onSummaryChange }:
     );
   }
 
-  const wordCount = content.split(/\s+/).filter(word => word.length > 0).length;
-  const isLoading_operations = updateSummaryMutation.isPending || 
-                               approveSummaryMutation.isPending || 
-                               regenerateMutation.isPending;
+  const wordCount = content
+    .split(/\s+/)
+    .filter((word) => word.length > 0).length;
+  const isLoading_operations = updateSummaryMutation.isPending;
 
   const getSaveStatus = () => {
     if (updateSummaryMutation.isPending) return "Saving...";
@@ -189,13 +245,16 @@ export default function SummaryEditor({ summaryId, onApprove, onSummaryChange }:
         {summary && (
           <div className="mb-4 flex flex-wrap gap-2">
             <Badge variant="outline" className="text-xs">
-              📄 {summary?.title || 'Summary'}
+              📄 {summary?.title || "Summary"}
             </Badge>
             <Badge variant="outline" className="text-xs">
-              📅 {summary?.createdAt ? new Date(summary.createdAt).toLocaleDateString() : 'Today'}
+              📅{" "}
+              {summary?.createdAt
+                ? new Date(summary.createdAt).toLocaleDateString()
+                : "Today"}
             </Badge>
             <Badge variant="outline" className="text-xs">
-              🎯 {summary?.tone || 'professional'}
+              🎯 {summary?.tone || "professional"}
             </Badge>
           </div>
         )}
@@ -205,13 +264,25 @@ export default function SummaryEditor({ summaryId, onApprove, onSummaryChange }:
           <div className="bg-gray-50 dark:bg-gray-700 px-4 py-2 border-b border-gray-200 dark:border-gray-600">
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-4">
-                <Button variant="ghost" size="sm" className="text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white"
+                >
                   <Bold className="h-4 w-4" />
                 </Button>
-                <Button variant="ghost" size="sm" className="text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white"
+                >
                   <Italic className="h-4 w-4" />
                 </Button>
-                <Button variant="ghost" size="sm" className="text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white"
+                >
                   <List className="h-4 w-4" />
                 </Button>
               </div>
@@ -220,7 +291,7 @@ export default function SummaryEditor({ summaryId, onApprove, onSummaryChange }:
               </div>
             </div>
           </div>
-          
+
           <Textarea
             className="min-h-96 border-0 focus:ring-0 resize-none bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-none"
             value={content}
@@ -231,7 +302,7 @@ export default function SummaryEditor({ summaryId, onApprove, onSummaryChange }:
 
         {/* Action Buttons */}
         <div className="flex flex-col sm:flex-row gap-4">
-          <Button 
+          <Button
             onClick={() => approveSummaryMutation.mutate()}
             disabled={isLoading_operations || !content.trim()}
             className="flex-1 bg-green-600 hover:bg-green-700 text-white font-medium py-3"
@@ -239,8 +310,8 @@ export default function SummaryEditor({ summaryId, onApprove, onSummaryChange }:
             <CheckCircle className="mr-2 h-4 w-4" />
             Approve Summary
           </Button>
-          
-          <Button 
+
+          <Button
             onClick={() => regenerateMutation.mutate()}
             disabled={isLoading_operations}
             variant="outline"
@@ -249,25 +320,25 @@ export default function SummaryEditor({ summaryId, onApprove, onSummaryChange }:
             <RefreshCw className="mr-2 h-4 w-4" />
             Regenerate
           </Button>
-          
+
           <div className="flex gap-2">
-            <Button 
-              onClick={() => exportPDFMutation.mutate()}
+            <Button
+              onClick={() => handleExport("pdf")}
               variant="outline"
-              className="px-6 py-3 border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
-              disabled={exportPDFMutation.isPending}
+              className="px-6 py-3"
+              disabled={isLoading_operations || !content.trim()}
             >
               <FileText className="mr-2 h-4 w-4" />
-              PDF
+              Export PDF
             </Button>
-            <Button 
-              onClick={() => exportDOCXMutation.mutate()}
+            <Button
+              onClick={() => handleExport("docx")}
               variant="outline"
-              className="px-6 py-3 border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
-              disabled={exportDOCXMutation.isPending}
+              className="px-6 py-3"
+              disabled={isLoading_operations || !content.trim()}
             >
               <Download className="mr-2 h-4 w-4" />
-              DOCX
+              Export DOCX
             </Button>
           </div>
         </div>
