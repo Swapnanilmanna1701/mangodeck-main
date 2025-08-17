@@ -1,12 +1,30 @@
-import sgMail from "@sendgrid/mail";
 import type { Summary, User } from "@shared/schema";
+import nodemailer from "nodemailer";
 import { generateDOCX, generatePDF } from "./exportService";
 
-if (!process.env.SENDGRID_API_KEY) {
-  throw new Error("SENDGRID_API_KEY environment variable must be set");
+// Validate environment variables
+const requiredEnvVars = [
+  "MAILTRAP_HOST",
+  "MAILTRAP_PORT",
+  "MAILTRAP_USER",
+  "MAILTRAP_PASS",
+];
+for (const envVar of requiredEnvVars) {
+  if (!process.env[envVar]) {
+    throw new Error(`${envVar} environment variable must be set`);
+  }
 }
 
-sgMail.setApiKey(process.env.SENDGRID_API_KEY!);
+// Create reusable transporter
+const transporter = nodemailer.createTransport({
+  
+  host: process.env.MAILTRAP_HOST,
+  port: parseInt(process.env.MAILTRAP_PORT!, 10),
+  auth: {
+    user: process.env.MAILTRAP_USER,
+    pass: process.env.MAILTRAP_PASS,
+  },
+});
 
 export async function sendSummaryEmail(
   summary: Summary,
@@ -23,20 +41,19 @@ export async function sendSummaryEmail(
     if (format === "pdf" || format === "both") {
       const pdfBuffer = await generatePDF(summary);
       attachments.push({
-        content: pdfBuffer.toString("base64"),
         filename: `${summary.title}.pdf`,
-        type: "application/pdf",
-        disposition: "attachment",
+        content: pdfBuffer,
+        contentType: "application/pdf",
       });
     }
 
     if (format === "both") {
       const docxBuffer = await generateDOCX(summary);
       attachments.push({
-        content: docxBuffer.toString("base64"),
         filename: `${summary.title}.docx`,
-        type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        disposition: "attachment",
+        content: docxBuffer,
+        contentType:
+          "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
       });
     }
 
@@ -84,11 +101,11 @@ This summary was generated using SummaryFlow - AI Meeting Transcript Summarizati
     `;
 
     const mailOptions = {
-      to: recipients,
       from: {
-        email: sender.email,
         name: sender.fullName,
+        address: sender.email,
       },
+      to: recipients,
       cc: ccSelf ? [sender.email] : undefined,
       subject: subject,
       text: textContent,
@@ -96,8 +113,19 @@ This summary was generated using SummaryFlow - AI Meeting Transcript Summarizati
       attachments: attachments,
     };
 
-    await sgMail.send(mailOptions);
+    // Send email
+    await transporter.sendMail(mailOptions);
   } catch (error: any) {
     throw new Error(`Email sending failed: ${error.message}`);
+  }
+}
+
+// Add this to emailService.ts
+export async function verifyEmailConnection(): Promise<void> {
+  try {
+    await transporter.verify();
+    console.log("Email service is ready");
+  } catch (error: any) {
+    throw new Error(`Email service verification failed: ${error.message}`);
   }
 }
